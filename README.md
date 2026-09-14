@@ -11,9 +11,16 @@ This is a fork of PSVshell, called PSVShell+. It adds a number of extra features
   - **front:** Use the thouchpad to emulate the front touchscreen
   - **F/B:** Emulated both the front and the back thouchpad, usign the touchpad button to toggle between them
   - **F/B/X:** Same as "F/B", but it toggles between front, back and off, not just front and back
-- DS4 motion emulation. This has two modes:
-  - **normal:** The DS4 controller has the same orientation as the Vita
-  - **vertical:** The DS4 held horizontally has the orientation of the Vita held vertically
+- DS3/DS4 motion emulation. This has two modes:
+  - **normal:** The controller has the same orientation as the Vita
+  - **vertical:** The controller held horizontally has the orientation of the Vita held vertically
+
+  The Bluetooth capture follows the [ds34motion](https://github.com/MERLev/ds34motion) design: the controller is
+  bound when it connects, reports are read when the transfer completes and the binding is dropped on disconnect.
+  The DualShock 3 only has an accelerometer and a yaw gyro, so the other two rotation axes stay still; the DS3
+  mapping is ported from ds34motion and has not been tested on hardware in this port. On a real PS Vita the
+  controller replaces the internal sensors while motion emulation is enabled in the profile (the setting must be
+  active when the game starts, because SceMotion reads the calibration only once).
 - Reboot or shutdown the Vita. This just seemed nice to have on hand.
 
 In the "FULL" mode, there are now two pages, that you can switch between using **L** and **R**. The main page is the
@@ -26,6 +33,7 @@ Saving the profile on the main page (below the clock speeds) also save the extra
 - To [Electry](https://github.com/Electry) for the original [PSVshell](https://github.com/Electry/PSVshell)
 - To [MERLev](https://github.com/MERLev) for [ds4Touch](https://github.com/MERLev/ds4Touch)
 - To [OperationNT414C](https://github.com/OperationNT414C) for [DSMotion](https://github.com/OperationNT414C/DSMotion)
+- To [MERLev](https://github.com/MERLev) for [ds34motion](https://github.com/MERLev/ds34motion), the successor of DSMotion
 - And a big thank you to [VitaSDK](https://github.com/vitasdk) for making this all possible.
 
 # Original readme

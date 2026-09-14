@@ -9,10 +9,24 @@ and this project adheres to "Ad Hoc" versioning (meaning, I assign versions base
 - FPS Limiter, that's active when only the FPS is visible.
 - Page indicator dots to the top of the widget in full mode.
 - Changelog
+- DualShock 3 motion emulation (accelerometer and yaw gyro), mapping ported from ds34motion.
 
 ### Changed
 - Updated code for new VitaSDK version (2022-03-10).
 - The FPS counter is now red, when the FPS limiter is enabled.
+- Bluetooth capture upgraded from the DSMotion design to the ds34motion 1.3.1 design: the controller is bound on
+  its connection event, input reports are read when the transfer completes instead of when it is queued (one report
+  of latency less, no stale data), the binding is dropped on the disconnect event, and the pending request is
+  protected by a mutex.
+
+### Fixed
+- Motion emulation on a real PS Vita: the synthetic sensor calibration is now returned whenever motion emulation is
+  enabled, instead of only when no motion device exists, so the injected samples are decoded correctly.
+- Motion samples are only injected while a controller is bound and its data is fresh; a disconnected controller no
+  longer keeps feeding its last sample.
+- The SceMotionDev device info word is now actually zeroed instead of an uninitialised value being returned.
+- Touch and motion hooks no longer interpret a failed SceTouch read as a buffer count.
+- Walking a HID request chain is bounded, so a self-linked request (as ds34vita queues) cannot hang the hook.
 
 ## [1.0] - 2021-08-11
 ### Added
