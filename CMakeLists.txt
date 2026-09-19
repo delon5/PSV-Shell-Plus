@@ -49,7 +49,7 @@ target_link_libraries(${PROJECT_NAME}
   SceBtForDriver_stub
 )
 
-vita_create_self(psvshell+.skprx ${PROJECT_NAME}
+vita_create_self(PSVshellPlus.skprx ${PROJECT_NAME}
   UNSAFE
   CONFIG ${CMAKE_SOURCE_DIR}/${PROJECT_NAME}.yml
 )

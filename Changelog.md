@@ -12,6 +12,7 @@ and this project adheres to "Ad Hoc" versioning (meaning, I assign versions base
 - DualShock 3 motion emulation (accelerometer and yaw gyro), mapping ported from ds34motion.
 
 ### Changed
+- The plugin file is now named PSVshellPlus.skprx (was psvshell+.skprx); update the entry in ur0:tai/config.txt.
 - Updated code for new VitaSDK version (2022-03-10).
 - The FPS counter is now red, when the FPS limiter is enabled.
 - Bluetooth capture upgraded from the DSMotion design to the ds34motion 1.3.1 design: the controller is bound on
