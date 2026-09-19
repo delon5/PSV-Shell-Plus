@@ -30,6 +30,22 @@ same as it was in PSVshell. All the extra features added by PSVShell+ are on the
 
 Saving the profile on the main page (below the clock speeds) also save the extra features in the same manner.
 
+## Installation
+
+1. Copy `PSVshellPlus.skprx` to `ur0:tai/`.
+2. Add it to `ur0:tai/config.txt` under the `*KERNEL` section (and remove any older `psvshell+.skprx` line):
+
+   ```
+   *KERNEL
+   ur0:tai/PSVshellPlus.skprx
+   ```
+
+3. Reboot. Press **SELECT + UP** to open the menu; the extra features are on the second page (**L**/**R**).
+
+If you used DSMotion, ds34motion or ds4Touch for your DualShock, remove them: PSVShell+ replaces both once the
+"Bt Touch" and "Bt Motion" options are enabled in the profile. On a real PS Vita you still need ds34vita (or
+ds4vita) to connect the controller in the first place.
+
 ## Acknowledgments
 
 - To [Electry](https://github.com/Electry) for the original [PSVshell](https://github.com/Electry/PSVshell)
