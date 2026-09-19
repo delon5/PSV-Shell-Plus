@@ -7,7 +7,7 @@ bool ksceAppMgrIsExclusiveProcessRunning();
 //bool ksceSblACMgrIsPspEmu(SceUID pid);
 //bool ksceSblACMgrIsSceShell(SceUID pid);
 
-#define PSVS_MAX_HOOKS 32
+#define PSVS_MAX_HOOKS 40 // highest index in use: 31
 static tai_hook_ref_t g_hookrefs[PSVS_MAX_HOOKS];
 static SceUID         g_hooks[PSVS_MAX_HOOKS];
 static SceUID         g_injects[1];
@@ -25,6 +25,10 @@ char g_titleid[32] = "";
 bool g_is_dolce = false;
 bool g_is_touch_dummy = false;
 bool g_is_motion_dev_dummy = false;
+
+// True when the synthetic motion calibration was last handed to SceMotion. SceMotion is only
+// assumed to read the calibration when it starts sampling, so samples must match what it got.
+static bool g_motion_calib_synthetic = false;
 
 int (*SceSysmemForKernel_0x3650963F)(uint32_t a1, SceSysmemAddressSpaceInfo *a2);
 int (*SceThreadmgrForDriver_0x7E280B69)(SceKernelSystemInfo *pInfo);
@@ -336,15 +340,22 @@ static int sceMotionDevSamplingStop_patched(void) {
 
 static int sceMotionDevRead_patched(SceMotionDevResult * resultList, int maxResult, int * setFlag) {
     int result = TAI_CONTINUE(int, g_hookrefs[26], resultList, maxResult, setFlag);
+
     if (g_profile.bt_motion) {
-        if (psvs_bt_motion_available()) {
-            // Inject the gamepad samples
+        if (g_is_motion_dev_dummy) {
+            // No motion device (PS TV): always feed SceMotion the latest captured sample
             result = psvs_bt_motion_filter_read(resultList, maxResult, setFlag);
-        } else if (!g_is_motion_dev_dummy) {
-            // The synthetic calibration is in effect, so the samples of the real sensors must not be passed through
-            result = 0;
+        } else if (g_motion_calib_synthetic) {
+            // Real sensors exist but SceMotion holds the synthetic calibration: inject the gamepad
+            // samples while they are fresh, otherwise report no samples rather than the real ones
+            result = psvs_bt_motion_available() ? psvs_bt_motion_filter_read(resultList, maxResult, setFlag) : 0;
         }
+        // else: SceMotion holds the real calibration, let the real sensors through
+    } else if (g_motion_calib_synthetic && !g_is_motion_dev_dummy) {
+        // Motion emulation was switched off after SceMotion took the synthetic calibration
+        result = 0;
     }
+
     return result;
 }
 
@@ -352,7 +363,8 @@ static int sceMotionDevGetDeviceInfo_patched(uint32_t * deviceInfo) {
     int result = TAI_CONTINUE(int, g_hookrefs[27], deviceInfo);
 
     uint32_t buffer = 0;
-    if (g_is_motion_dev_dummy || g_profile.bt_motion) {
+    g_motion_calib_synthetic = g_is_motion_dev_dummy || g_profile.bt_motion;
+    if (g_motion_calib_synthetic) {
         result = psvs_bt_motion_reset_device_info(&buffer);
         ksceKernelMemcpyKernelToUser(deviceInfo, &buffer, sizeof(buffer));
     }
@@ -364,7 +376,8 @@ static int sceMotionDevGetGyroBias_patched(SceMotionDevGyroBias * bias) {
     int result = TAI_CONTINUE(int, g_hookrefs[28], bias);
 
     SceMotionDevGyroBias buffer;
-    if (g_is_motion_dev_dummy || g_profile.bt_motion) {
+    g_motion_calib_synthetic = g_is_motion_dev_dummy || g_profile.bt_motion;
+    if (g_motion_calib_synthetic) {
         result = psvs_bt_motion_reset_gyro_bias(&buffer);
         ksceKernelMemcpyKernelToUser(bias, &buffer, sizeof(buffer));
     }
@@ -376,7 +389,8 @@ static int sceMotionDevGetGyroCalibData_patched(SceMotionDevGyroCalibData * data
     int result = TAI_CONTINUE(int, g_hookrefs[29], data);
 
     SceMotionDevGyroCalibData buffer;
-    if (g_is_motion_dev_dummy || g_profile.bt_motion) {
+    g_motion_calib_synthetic = g_is_motion_dev_dummy || g_profile.bt_motion;
+    if (g_motion_calib_synthetic) {
         result = psvs_bt_motion_reset_gyro_calib_data(&buffer);
         ksceKernelMemcpyKernelToUser(data, &buffer, sizeof(buffer));
     }
@@ -388,7 +402,8 @@ static int sceMotionDevGetAccCalibData_patched(SceMotionDevAccCalibData * data) 
     int result = TAI_CONTINUE(int, g_hookrefs[30], data);
 
     SceMotionDevAccCalibData buffer;
-    if (g_is_motion_dev_dummy || g_profile.bt_motion) {
+    g_motion_calib_synthetic = g_is_motion_dev_dummy || g_profile.bt_motion;
+    if (g_motion_calib_synthetic) {
         result = psvs_bt_motion_reset_accel_calib_data(&buffer);
         ksceKernelMemcpyKernelToUser(data, &buffer, sizeof(buffer));
     }

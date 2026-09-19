@@ -5,22 +5,24 @@ This is a fork of PSVshell, called PSVShell+. It adds a number of extra features
 
 ## Extra features
 
-- Swap the cross and cirle buttons for playing japanese games
+- Swap the cross and circle buttons for playing japanese games
 - Disable **L3** and **R3** (the stick buttons) to prevent you from accidentally pressing them
 - DS4 touchpad emulation. This has three modes:
-  - **front:** Use the thouchpad to emulate the front touchscreen
-  - **F/B:** Emulated both the front and the back thouchpad, usign the touchpad button to toggle between them
+  - **front:** Use the touchpad to emulate the front touchscreen
+  - **F/B:** Emulates both the front and the back touchpad, using the touchpad button to toggle between them
   - **F/B/X:** Same as "F/B", but it toggles between front, back and off, not just front and back
 - DS3/DS4 motion emulation. This has two modes:
   - **normal:** The controller has the same orientation as the Vita
   - **vertical:** The controller held horizontally has the orientation of the Vita held vertically
 
   The Bluetooth capture follows the [ds34motion](https://github.com/MERLev/ds34motion) design: the controller is
-  bound when it connects, reports are read when the transfer completes and the binding is dropped on disconnect.
-  The DualShock 3 only has an accelerometer and a yaw gyro, so the other two rotation axes stay still; the DS3
-  mapping is ported from ds34motion and has not been tested on hardware in this port. On a real PS Vita the
-  controller replaces the internal sensors while motion emulation is enabled in the profile (the setting must be
-  active when the game starts, because SceMotion reads the calibration only once).
+  bound when it connects (or on its first report, if it was already connected when the plugin started), reports
+  are read when the transfer completes and the binding is dropped on disconnect. The DualShock 3 only has an
+  accelerometer and a yaw gyro, so the other two rotation axes stay still; the DS3 mapping is ported from
+  ds34motion and has not been tested on hardware in this port. On a real PS Vita the controller replaces the
+  internal sensors while motion emulation is enabled in the profile. Enable it before starting the game: the
+  synthetic sensor calibration is handed to SceMotion when it initialises, so toggling the setting mid-game
+  leaves motion disabled until the game is restarted (untested on a real PS Vita).
 - Reboot or shutdown the Vita. This just seemed nice to have on hand.
 
 In the "FULL" mode, there are now two pages, that you can switch between using **L** and **R**. The main page is the

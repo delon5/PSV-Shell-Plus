@@ -15,17 +15,24 @@ and this project adheres to "Ad Hoc" versioning (meaning, I assign versions base
 - Updated code for new VitaSDK version (2022-03-10).
 - The FPS counter is now red, when the FPS limiter is enabled.
 - Bluetooth capture upgraded from the DSMotion design to the ds34motion 1.3.1 design: the controller is bound on
-  its connection event, input reports are read when the transfer completes instead of when it is queued (one report
-  of latency less, no stale data), the binding is dropped on the disconnect event, and the pending request is
-  protected by a mutex.
+  its connection event (or lazily on its first report if it was already connected), input reports are read when
+  the transfer completes instead of when it is queued (one report of latency less, no stale data), a read that
+  delivers an unrecognised report keeps the buffer pending, the binding is dropped on the disconnect event, and
+  the pending request is protected by a mutex. Should read events never surface, the plugin falls back to the old
+  transfer-time parsing after a few reports.
+- A DS4 report is now only accepted when it carries the full report id (0x11), as ds34motion and ds34vita do.
+- The controller binding is only kept alive by consumed reports, so a device the DS3 heuristic misidentifies frees
+  the binding after five seconds; a DS4 misidentified as a DS3 corrects itself on its first full report.
 
 ### Fixed
 - Motion emulation on a real PS Vita: the synthetic sensor calibration is now returned whenever motion emulation is
   enabled, instead of only when no motion device exists, so the injected samples are decoded correctly.
-- Motion samples are only injected while a controller is bound and its data is fresh; a disconnected controller no
-  longer keeps feeding its last sample.
+- On a real PS Vita motion samples are only injected while a controller is bound and its data is fresh; a
+  disconnected controller no longer keeps feeding its last sample. On a PS TV the latest captured sample keeps
+  being fed, as before.
 - The SceMotionDev device info word is now actually zeroed instead of an uninitialised value being returned.
-- Touch and motion hooks no longer interpret a failed SceTouch read as a buffer count.
+- The SceTouch hooks no longer interpret a failed read as a buffer count.
+- Touch emulation now judges data freshness by the time of the last report instead of the last transfer.
 - Walking a HID request chain is bounded, so a self-linked request (as ds34vita queues) cannot hang the hook.
 
 ## [1.0] - 2021-08-11

@@ -132,6 +132,10 @@ typedef struct psvs_ds4_input_report_t psvs_ds4_input_report_t;
 // Upper bound when walking a HID request chain (ds34vita links a request to itself)
 #define PSVS_BT_MAX_REQUEST_CHAIN 8
 
+// Number of captured read requests without a single read event before falling back to parsing
+// reports when they are queued (the pre-ds34motion behaviour, one report late but proven on PS TV)
+#define PSVS_BT_READ_EVENT_GRACE 16
+
 typedef enum psvs_gamepad_type_t {
     PSVS_GAMEPAD_NONE = 0,
     PSVS_GAMEPAD_DS3,
@@ -195,7 +199,7 @@ typedef struct psvs_motion_calib_t {
 
 typedef struct psvs_gamepad_t {
     psvs_gamepad_type_t type;
-    uint64_t timestamp;
+    uint64_t timestamp; // Bind time, then the time of the last consumed report
     unsigned int mac0;
     unsigned int mac1;
     psvs_touch_info_t touch;
@@ -221,10 +225,17 @@ static psvs_motion_calib_t g_motion_calib = {
 };
 
 // Pending HID read request of the bound gamepad. The buffer is filled asynchronously, so it is
-// only read once the matching read event arrives (ds34motion 1.3.1 "delayed inputs" fix).
+// only read once the matching read event arrives. Like ds34motion 1.3.1 the buffer stays pending
+// when a read event delivers a report we do not recognise.
 static SceUID g_bt_mutex_uid = -1;
 static const unsigned char * g_bt_recv_buff = NULL;
 static uint32_t g_bt_recv_length = 0;
+
+// Read events are the normal way to learn that a report arrived (DSMotion, ds34motion and ds34vita
+// all rely on them). Should they never surface, fall back to the old transfer-time parsing so the
+// controller keeps working, one report late.
+static bool g_bt_read_event_seen = false;
+static uint32_t g_bt_reads_without_event = 0;
 
 // Force inline functions
 #define INLINE __attribute__((always_inline)) __inline__
@@ -264,9 +275,10 @@ void psvs_bt_done() {
     g_bt_mutex_uid = -1;
 }
 
-INLINE static void _psvs_bt_lock() {
-    if (g_bt_mutex_uid >= 0)
-        ksceKernelLockMutex(g_bt_mutex_uid, 1, NULL);
+INLINE static bool _psvs_bt_lock() {
+    if (g_bt_mutex_uid < 0)
+        return true;
+    return ksceKernelLockMutex(g_bt_mutex_uid, 1, NULL) >= 0;
 }
 
 INLINE static void _psvs_bt_unlock() {
@@ -298,9 +310,8 @@ static psvs_gamepad_type_t _psvs_bt_identify(unsigned int mac0, unsigned int mac
     unsigned short vid_pid[2] = {0, 0};
     int ret_vid_pid = ksceBtGetVidPid(mac0, mac1, vid_pid);
 
-    psvs_gamepad_type_t type = PSVS_GAMEPAD_NONE;
-    if (ret_vid_pid >= 0)
-        type = _psvs_bt_get_gamepad_type(vid_pid[0], vid_pid[1]);
+    // A zeroed pair can never match a Sony controller, so the return code only matters for the DS3 heuristic
+    psvs_gamepad_type_t type = _psvs_bt_get_gamepad_type(vid_pid[0], vid_pid[1]);
 
     // A DualShock 3 reports neither VID/PID nor a name over Bluetooth
     if (type == PSVS_GAMEPAD_NONE) {
@@ -313,7 +324,9 @@ static psvs_gamepad_type_t _psvs_bt_identify(unsigned int mac0, unsigned int mac
     return type;
 }
 
-// Bind a gamepad and reset all captured data (calibration is kept, SceMotion only reads it once)
+// Bind a gamepad and reset all captured data. The synthetic calibration lives in g_motion_calib and
+// is deliberately left alone. Readers on other threads are lock-free: a reader racing with this
+// memset can at worst see one zeroed frame (an empty, timed-out touch frame; a 0 G motion sample).
 static void _psvs_bt_bind(psvs_gamepad_type_t type, unsigned int mac0, unsigned int mac1) {
     memset(&g_gamepad, 0, sizeof(g_gamepad));
     g_gamepad.type = type;
@@ -322,12 +335,14 @@ static void _psvs_bt_bind(psvs_gamepad_type_t type, unsigned int mac0, unsigned 
     g_gamepad.timestamp = ksceKernelGetSystemTimeWide();
     g_bt_recv_buff = NULL;
     g_bt_recv_length = 0;
+    g_bt_reads_without_event = 0;
 }
 
 static void _psvs_bt_unbind() {
     memset(&g_gamepad, 0, sizeof(g_gamepad));
     g_bt_recv_buff = NULL;
     g_bt_recv_length = 0;
+    g_bt_reads_without_event = 0;
 }
 
 INLINE static bool _psvs_bt_is_bound(unsigned int mac0, unsigned int mac1) {
@@ -340,26 +355,21 @@ INLINE static bool _psvs_bt_connection_timed_out() {
 
 // Lazily bind the gamepad that is talking to us (fallback for a gamepad whose connection event was
 // not seen, e.g. because it was already connected when this module started). Must hold the lock.
+// Liveness is only refreshed by consumed reports, so a device that never delivers a usable report
+// (a misidentified one, or a DS4 still in its basic report mode) frees the binding after the
+// connection timeout instead of holding it forever.
 static bool _psvs_bt_connected(unsigned int mac0, unsigned int mac1) {
 
-    // No gamepad is currently connected
+    // Connected gamepad
+    if (_psvs_bt_is_bound(mac0, mac1) && !_psvs_bt_connection_timed_out())
+        return true;
+
+    // No gamepad is currently connected (or the bound one went silent): identify and bind
     if (!g_gamepad.type || _psvs_bt_connection_timed_out()) {
-        // Get VID and PID
-        unsigned short result[2] = {0, 0};
-        if (ksceBtGetVidPid(mac0, mac1, result) < 0)
-            return false;
-        // Get gamepad type
-        psvs_gamepad_type_t type = _psvs_bt_get_gamepad_type(result[0], result[1]);
-        // Initialize gamepad
+        psvs_gamepad_type_t type = _psvs_bt_identify(mac0, mac1);
         if (type)
             _psvs_bt_bind(type, mac0, mac1);
         return !! type;
-    }
-
-    // Connected gamepad
-    if (_psvs_bt_is_bound(mac0, mac1)) {
-        g_gamepad.timestamp = ksceKernelGetSystemTimeWide();
-        return true;
     }
 
     // Not the connected gamepad
@@ -475,23 +485,38 @@ static void _psvs_bt_process_ds3_report(const psvs_ds3_input_report_t * report) 
     }
 }
 
-// A read request completed: the buffer now holds a fresh input report. Must hold the lock.
-static void _psvs_bt_process_report(const unsigned char * buffer, uint32_t length) {
+// A read request completed: the buffer holds an input report. Returns true when the report was
+// recognised and consumed. Must hold the lock.
+static bool _psvs_bt_process_report(const unsigned char * buffer, uint32_t length) {
+    if (!buffer || !g_gamepad.type)
+        return false;
+
+    // Only a DS4 sends full 0x11 reports: a controller the DS3 heuristic misidentified corrects itself here
+    if (g_gamepad.type == PSVS_GAMEPAD_DS3 && buffer[0] == PSVS_DS4_REPORT_ID
+            && length >= sizeof(psvs_ds4_input_report_t)) {
+        _psvs_bt_bind(PSVS_GAMEPAD_DS4, g_gamepad.mac0, g_gamepad.mac1);
+    }
+
     uint32_t size = _psvs_bt_get_report_size(g_gamepad.type);
-    if (!buffer || !size || length < size)
-        return;
+    if (!size || length < size)
+        return false;
 
     if (g_gamepad.type == PSVS_GAMEPAD_DS4 && buffer[0] == PSVS_DS4_REPORT_ID) {
         g_gamepad.timestamp = ksceKernelGetSystemTimeWide();
         _psvs_bt_process_ds4_report((const psvs_ds4_input_report_t *) buffer);
-    } else if (g_gamepad.type == PSVS_GAMEPAD_DS3 && buffer[0] == PSVS_DS3_REPORT_ID) {
+        return true;
+    }
+    if (g_gamepad.type == PSVS_GAMEPAD_DS3 && buffer[0] == PSVS_DS3_REPORT_ID) {
         g_gamepad.timestamp = ksceKernelGetSystemTimeWide();
         _psvs_bt_process_ds3_report((const psvs_ds3_input_report_t *) buffer);
+        return true;
     }
+    return false;
 }
 
 void psvs_bt_on_hid_transfer(unsigned int mac0, unsigned int mac1, SceBtHidRequest * head) {
-    _psvs_bt_lock();
+    if (!_psvs_bt_lock())
+        return;
 
     // Only follow gamepads while a Bluetooth feature is enabled, or a gamepad is already bound
     bool bound;
@@ -501,19 +526,43 @@ void psvs_bt_on_hid_transfer(unsigned int mac0, unsigned int mac1, SceBtHidReque
         bound = _psvs_bt_is_bound(mac0, mac1);
 
     if (bound) {
-        // Remember the buffer of the last read request in the chain. It is only read once the
-        // corresponding read event arrives, because the transfer completes asynchronously.
+        // Find the last read request in the chain (write and feature requests are left alone, so a
+        // write interleaved with a pending read does not drop the read)
         uint32_t size = _psvs_bt_get_report_size(g_gamepad.type);
+        const unsigned char * buffer = NULL;
+        uint32_t length = 0;
+        bool read = false;
         int steps = 0;
         for (SceBtHidRequest * request = head; request && steps < PSVS_BT_MAX_REQUEST_CHAIN; ++ steps) {
-            if (request->type == PSVS_BT_HID_REQUEST_READ && request->buffer && request->length >= size) {
-                g_bt_recv_buff = (const unsigned char *) request->buffer;
-                g_bt_recv_length = request->length;
+            if (request->type == PSVS_BT_HID_REQUEST_READ) {
+                read = true;
+                if (request->buffer && request->length >= size) {
+                    buffer = (const unsigned char *) request->buffer;
+                    length = request->length;
+                } else {
+                    buffer = NULL; // a read that cannot hold a report disarms the previous one
+                    length = 0;
+                }
             }
             // ds34vita links its single read request to itself
             if (request->next == request)
                 break;
             request = request->next;
+        }
+
+        if (read) {
+            if (!g_bt_read_event_seen && g_bt_reads_without_event >= PSVS_BT_READ_EVENT_GRACE) {
+                // No read event ever surfaced: parse the report when the read is queued, as before
+                _psvs_bt_process_report(buffer, length);
+                g_bt_recv_buff = NULL;
+                g_bt_recv_length = 0;
+            } else {
+                // The buffer is filled asynchronously; it is read once the read event arrives
+                g_bt_recv_buff = buffer;
+                g_bt_recv_length = length;
+                if (!g_bt_read_event_seen)
+                    ++ g_bt_reads_without_event;
+            }
         }
     }
 
@@ -521,7 +570,8 @@ void psvs_bt_on_hid_transfer(unsigned int mac0, unsigned int mac1, SceBtHidReque
 }
 
 void psvs_bt_on_read_event(const SceBtEvent * events, int count) {
-    _psvs_bt_lock();
+    if (!_psvs_bt_lock())
+        return;
 
     for (int i = 0; i < count; ++ i) {
         const SceBtEvent * event = &events[i];
@@ -543,9 +593,14 @@ void psvs_bt_on_read_event(const SceBtEvent * events, int count) {
 
             case PSVS_BT_EVENT_HID_READ:
                 if (_psvs_bt_is_bound(event->mac0, event->mac1)) {
-                    _psvs_bt_process_report(g_bt_recv_buff, g_bt_recv_length);
-                    g_bt_recv_buff = NULL;
-                    g_bt_recv_length = 0;
+                    g_bt_read_event_seen = true;
+                    g_bt_reads_without_event = 0;
+                    // Keep the buffer pending when the report is not (yet) one we recognise, e.g. a
+                    // DS4 still in its basic report mode (ds34motion 1.3.1 "delayed inputs" fix)
+                    if (_psvs_bt_process_report(g_bt_recv_buff, g_bt_recv_length)) {
+                        g_bt_recv_buff = NULL;
+                        g_bt_recv_length = 0;
+                    }
                 }
                 break;
 
@@ -568,14 +623,14 @@ int psvs_bt_touch_filter_input(bool peek, uint32_t port, SceTouchData *pData, ui
         return nBufs;
     }
 
-    // On very old data
-    if (ksceKernelGetSystemTimeWide() - g_gamepad.timestamp > PSVS_BT_PACKET_TIMEOUT) {
-        port = SCE_TOUCH_PORT_MAX_NUM + 1; // Make both panels inactive
-    }
-
     // Get latest frame
     int last = __atomic_load_n(&g_gamepad.touch.last, __ATOMIC_SEQ_CST); // Atomic ensures that we never read the buffer that is currently written
     psvs_touch_frame_t * frame = &g_gamepad.touch.frames[last];
+
+    // On very old data (or no data yet)
+    if (ksceKernelGetSystemTimeWide() - frame->timestamp > PSVS_BT_PACKET_TIMEOUT) {
+        port = SCE_TOUCH_PORT_MAX_NUM + 1; // Make both panels inactive
+    }
 
     // Base data
     SceTouchData data = {
@@ -585,7 +640,7 @@ int psvs_bt_touch_filter_input(bool peek, uint32_t port, SceTouchData *pData, ui
     };
 
     // On active panel
-    if (port == frame->port) {
+    if ((int) port == frame->port) {
         data.reportNum = frame->count;
         for (int j = 0; j < frame->count; ++ j) {
             SceTouchReport point = {
@@ -598,8 +653,8 @@ int psvs_bt_touch_filter_input(bool peek, uint32_t port, SceTouchData *pData, ui
         }
     }
 
-    // TODO: use more then one frame
-    for (int i = 0; i < nBufs; ++ i) {
+    // TODO: use more than one frame
+    for (uint32_t i = 0; i < nBufs; ++ i) {
         // Override data
         pData[i] = data;
     }
@@ -608,6 +663,8 @@ int psvs_bt_touch_filter_input(bool peek, uint32_t port, SceTouchData *pData, ui
     return nBufs;
 }
 
+// Lock-free on purpose: this runs on SceMotion's sampling thread and must not wait behind the
+// Bluetooth stack. A bind/unbind racing with it costs at most one dropped sample.
 bool psvs_bt_motion_available() {
 
     // No gamepad, or no motion data captured yet
@@ -625,19 +682,12 @@ bool psvs_bt_motion_available() {
     return true;
 }
 
-int psvs_bt_motion_filter_read(SceMotionDevResult * resultList, uint32_t count, int * setFlag) {
+// Write one SceMotionDev result built from a motion frame (G and deg/sec) to the user buffer
+static int _psvs_bt_motion_write(psvs_motion_frame_t frame, SceMotionDevResult * resultList) {
 
     // Kernel side data buffer
     SceMotionDevResult buffer;
     memset(&buffer, 0, sizeof(buffer));
-
-    // Count is always 64, but it does not hurt to check
-    if (count == 0)
-        return count;
-
-    // Get latest frame
-    int last = __atomic_load_n(&g_gamepad.motion.last, __ATOMIC_SEQ_CST); // Atomic ensures that we never read the buffer that is currently written
-    psvs_motion_frame_t frame = g_gamepad.motion.frames[last];
 
     // Fill out buffer
     buffer.timestamp = frame.timestamp;
@@ -688,6 +738,21 @@ int psvs_bt_motion_filter_read(SceMotionDevResult * resultList, uint32_t count, 
 
     // For now only a single event for each call
     return 1;
+}
+
+// Inject the latest captured motion frame (whatever its age; callers decide whether it is fresh
+// enough with psvs_bt_motion_available)
+int psvs_bt_motion_filter_read(SceMotionDevResult * resultList, uint32_t count, int * setFlag) {
+
+    // Count is always 64, but it does not hurt to check
+    if (count == 0)
+        return count;
+
+    // Get latest frame
+    int last = __atomic_load_n(&g_gamepad.motion.last, __ATOMIC_SEQ_CST); // Atomic ensures that we never read the buffer that is currently written
+    psvs_motion_frame_t frame = g_gamepad.motion.frames[last];
+
+    return _psvs_bt_motion_write(frame, resultList);
 }
 
 int psvs_bt_motion_reset_device_info(uint32_t * info) {
