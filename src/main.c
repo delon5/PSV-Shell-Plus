@@ -7,7 +7,7 @@ bool ksceAppMgrIsExclusiveProcessRunning();
 //bool ksceSblACMgrIsPspEmu(SceUID pid);
 //bool ksceSblACMgrIsSceShell(SceUID pid);
 
-#define PSVS_MAX_HOOKS 40 // highest index in use: 31
+#define PSVS_MAX_HOOKS 40 // highest index in use: 35
 static tai_hook_ref_t g_hookrefs[PSVS_MAX_HOOKS];
 static SceUID         g_hooks[PSVS_MAX_HOOKS];
 static SceUID         g_injects[1];
@@ -152,6 +152,12 @@ DECL_FUNC_HOOK_PATCH_CTRL(5, sceCtrlReadBufferNegative)
 DECL_FUNC_HOOK_PATCH_CTRL(6, sceCtrlReadBufferNegative2)
 DECL_FUNC_HOOK_PATCH_CTRL(7, sceCtrlReadBufferPositive)
 DECL_FUNC_HOOK_PATCH_CTRL(8, sceCtrlReadBufferPositive2)
+// The "Ext" readers return the same SceCtrlData (with the extra L2/R2/L3/R3 bits of an external
+// controller) and are what games with PS TV controller support and the system dialogs use
+DECL_FUNC_HOOK_PATCH_CTRL(32, sceCtrlPeekBufferPositiveExt)
+DECL_FUNC_HOOK_PATCH_CTRL(33, sceCtrlPeekBufferPositiveExt2)
+DECL_FUNC_HOOK_PATCH_CTRL(34, sceCtrlReadBufferPositiveExt)
+DECL_FUNC_HOOK_PATCH_CTRL(35, sceCtrlReadBufferPositiveExt2)
 
 int kscePowerSetArmClockFrequency_patched(int freq) {
     int ret = ksceKernelLockMutex(g_mutex_cpufreq_uid, 1, NULL);
@@ -527,6 +533,14 @@ int module_start(SceSize argc, const void *args) {
             "SceCtrl", 0xD197E3C7, 0x67E7AB83, sceCtrlReadBufferPositive_patched);
     g_hooks[8] = taiHookFunctionExportForKernel(KERNEL_PID, &g_hookrefs[8],
             "SceCtrl", 0xD197E3C7, 0xC4226A3E, sceCtrlReadBufferPositive2_patched);
+    g_hooks[32] = taiHookFunctionExportForKernel(KERNEL_PID, &g_hookrefs[32],
+            "SceCtrl", 0xD197E3C7, 0xA59454D3, sceCtrlPeekBufferPositiveExt_patched);
+    g_hooks[33] = taiHookFunctionExportForKernel(KERNEL_PID, &g_hookrefs[33],
+            "SceCtrl", 0xD197E3C7, 0x860BF292, sceCtrlPeekBufferPositiveExt2_patched);
+    g_hooks[34] = taiHookFunctionExportForKernel(KERNEL_PID, &g_hookrefs[34],
+            "SceCtrl", 0xD197E3C7, 0xE2D99296, sceCtrlReadBufferPositiveExt_patched);
+    g_hooks[35] = taiHookFunctionExportForKernel(KERNEL_PID, &g_hookrefs[35],
+            "SceCtrl", 0xD197E3C7, 0xA7178860, sceCtrlReadBufferPositiveExt2_patched);
 
     // Hook power
     g_hooks[9] = taiHookFunctionExportForKernel(KERNEL_PID, &g_hookrefs[9],

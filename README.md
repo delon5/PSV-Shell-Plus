@@ -5,7 +5,9 @@ This is a fork of PSVshell, called PSVShell+. It adds a number of extra features
 
 ## Extra features
 
-- Swap the cross and circle buttons for playing japanese games
+- Swap the cross and circle buttons for playing japanese games. The swap covers everything the game reads,
+  including the system dialogs it opens (save data, message and selection dialogs); the icons those dialogs show
+  still follow the system's enter-button setting
 - Disable **L3** and **R3** (the stick buttons) to prevent you from accidentally pressing them
 - DS4 touchpad emulation. This has three modes:
   - **front:** Use the touchpad to emulate the front touchscreen

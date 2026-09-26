@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to "Ad Hoc" versioning (meaning, I assign versions based on how I like it).
 
+## [1.3] - 2026-09-26
+### Fixed
+- The X/O swap and the L3/R3 disable now also apply to input read through the "Ext" controller functions
+  (sceCtrlPeek/ReadBufferPositiveExt and Ext2). The system dialogs shown inside games (save data, message and
+  selection dialogs) and games with PS TV controller support read the pad that way, so the swap did not reach
+  them before. The button icons those dialogs display still follow the system's enter-button setting.
+
 ## [1.2] - 2026-09-19
 ### Added
 - DualShock 3 motion emulation (accelerometer and yaw gyro), mapping ported from ds34motion.
@@ -54,6 +61,7 @@ and this project adheres to "Ad Hoc" versioning (meaning, I assign versions base
 ### Changed
 - Updated the README.md with the additional features
 
+[1.3]: https://github.com/delon5/PSV-Shell-Plus/compare/1.2...1.3
 [1.2]: https://github.com/delon5/PSV-Shell-Plus/compare/1.1...1.2
 [1.1]: https://github.com/delon5/PSV-Shell-Plus/compare/1.0...1.1
 [1.0]: https://github.com/delon5/PSV-Shell-Plus/releases/tag/1.0
