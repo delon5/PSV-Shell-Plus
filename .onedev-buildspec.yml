@@ -30,7 +30,7 @@ jobs:
       - ''
       - '# Copy artifacts'
       - mkdir $root/release
-      - cp psvshell+.skprx $root/release/
+      - cp PSVshellPlus.skprx $root/release/
       - ''
       - '# Generate release notes'
       - echo "build @build_number@" > $root/release/release.txt

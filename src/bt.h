@@ -91,16 +91,16 @@ typedef enum {
 void psvs_bt_init();
 void psvs_bt_done();
 
-bool psvs_bt_connected(unsigned int mac0, unsigned int mac1);
-void psvs_bt_on_hid_transfer(SceBtHidRequest * request);
+// Bluetooth capture (called from the SceBt hooks)
+void psvs_bt_on_hid_transfer(unsigned int mac0, unsigned int mac1, SceBtHidRequest * request);
+void psvs_bt_on_read_event(const SceBtEvent * events, int count);
 
+// Touch emulation
 int psvs_bt_touch_filter_input(bool peek, uint32_t port, SceTouchData *pData, uint32_t nBufs);
-int psvs_bt_motion_filter_read(SceMotionDevResult * resultList, uint32_t count, int * setFlag);
 
-void psvs_bt_motion_set_device_info(const uint32_t * info);
-void psvs_bt_motion_set_gyro_bias(const SceMotionDevGyroBias * bias);
-void psvs_bt_motion_set_gyro_calib_data(const SceMotionDevGyroCalibData * data);
-void psvs_bt_motion_set_accel_calib_data(const SceMotionDevAccCalibData * data);
+// Motion emulation
+bool psvs_bt_motion_available();
+int psvs_bt_motion_filter_read(SceMotionDevResult * resultList, uint32_t count, int * setFlag);
 
 int psvs_bt_motion_reset_device_info(uint32_t * info);
 int psvs_bt_motion_reset_gyro_bias(SceMotionDevGyroBias * bias);

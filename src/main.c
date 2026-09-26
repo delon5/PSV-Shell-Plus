@@ -7,7 +7,7 @@ bool ksceAppMgrIsExclusiveProcessRunning();
 //bool ksceSblACMgrIsPspEmu(SceUID pid);
 //bool ksceSblACMgrIsSceShell(SceUID pid);
 
-#define PSVS_MAX_HOOKS 32
+#define PSVS_MAX_HOOKS 40 // highest index in use: 35
 static tai_hook_ref_t g_hookrefs[PSVS_MAX_HOOKS];
 static SceUID         g_hooks[PSVS_MAX_HOOKS];
 static SceUID         g_injects[1];
@@ -25,6 +25,10 @@ char g_titleid[32] = "";
 bool g_is_dolce = false;
 bool g_is_touch_dummy = false;
 bool g_is_motion_dev_dummy = false;
+
+// True when the synthetic motion calibration was last handed to SceMotion. SceMotion is only
+// assumed to read the calibration when it starts sampling, so samples must match what it got.
+static bool g_motion_calib_synthetic = false;
 
 int (*SceSysmemForKernel_0x3650963F)(uint32_t a1, SceSysmemAddressSpaceInfo *a2);
 int (*SceThreadmgrForDriver_0x7E280B69)(SceKernelSystemInfo *pInfo);
@@ -148,6 +152,12 @@ DECL_FUNC_HOOK_PATCH_CTRL(5, sceCtrlReadBufferNegative)
 DECL_FUNC_HOOK_PATCH_CTRL(6, sceCtrlReadBufferNegative2)
 DECL_FUNC_HOOK_PATCH_CTRL(7, sceCtrlReadBufferPositive)
 DECL_FUNC_HOOK_PATCH_CTRL(8, sceCtrlReadBufferPositive2)
+// The "Ext" readers return the same SceCtrlData (with the extra L2/R2/L3/R3 bits of an external
+// controller) and are what games with PS TV controller support and the system dialogs use
+DECL_FUNC_HOOK_PATCH_CTRL(32, sceCtrlPeekBufferPositiveExt)
+DECL_FUNC_HOOK_PATCH_CTRL(33, sceCtrlPeekBufferPositiveExt2)
+DECL_FUNC_HOOK_PATCH_CTRL(34, sceCtrlReadBufferPositiveExt)
+DECL_FUNC_HOOK_PATCH_CTRL(35, sceCtrlReadBufferPositiveExt2)
 
 int kscePowerSetArmClockFrequency_patched(int freq) {
     int ret = ksceKernelLockMutex(g_mutex_cpufreq_uid, 1, NULL);
@@ -279,8 +289,16 @@ PROCEVENT_EXIT:
 
 static int ksceBtHidTransfer_patched(unsigned int mac0, unsigned int mac1, SceBtHidRequest *request) {
     int result = TAI_CONTINUE(int, g_hookrefs[18], mac0, mac1, request);
-    if ((g_profile.bt_touch || g_profile.bt_motion) && result >= 0 && psvs_bt_connected(mac0, mac1))
-        psvs_bt_on_hid_transfer(request);
+    if (result >= 0)
+        psvs_bt_on_hid_transfer(mac0, mac1, request);
+    return result;
+}
+
+static int ksceBtReadEvent_patched(SceBtEvent *events, int num_events) {
+    int result = TAI_CONTINUE(int, g_hookrefs[31], events, num_events);
+    // The result is the number of events read
+    if (result > 0 && events)
+        psvs_bt_on_read_event(events, (result < num_events) ? result : num_events);
     return result;
 }
 
@@ -290,28 +308,28 @@ static int ksceTouchGetPanelInfo_patched(SceUInt32 port, SceTouchPanelInfo *pPan
 
 static int ksceTouchPeek_patched(SceUInt32 port, SceTouchData *pData, SceUInt32 nBufs) {
     int result = TAI_CONTINUE(int, g_hookrefs[20], port, pData, nBufs);
-    if (g_profile.bt_touch)
+    if (g_profile.bt_touch && result >= 0)
         result = psvs_bt_touch_filter_input(true, port, pData, result);
     return result;
 }
 
 static int ksceTouchRead_patched(SceUInt32 port, SceTouchData *pData, SceUInt32 nBufs) {
     int result = TAI_CONTINUE(int, g_hookrefs[21], port, pData, nBufs);
-    if (g_profile.bt_touch)
+    if (g_profile.bt_touch && result >= 0)
         result = psvs_bt_touch_filter_input(false, port, pData, result);
     return result;
 }
 
 static int ksceTouchPeekRegion_patched(SceUInt32 port, SceTouchData *pData, SceUInt32 nBufs, int region) {
     int result = TAI_CONTINUE(int, g_hookrefs[22], port, pData, nBufs, region);
-    if (g_profile.bt_touch)
+    if (g_profile.bt_touch && result >= 0)
         result = psvs_bt_touch_filter_input(true, port, pData, result);
     return result;
 }
 
 static int ksceTouchReadRegion_patched(SceUInt32 port, SceTouchData *pData, SceUInt32 nBufs, int region) {
     int result = TAI_CONTINUE(int, g_hookrefs[23], port, pData, nBufs, region);
-    if (g_profile.bt_touch)
+    if (g_profile.bt_touch && result >= 0)
         result = psvs_bt_touch_filter_input(false, port, pData, result);
     return result;
 }
@@ -328,23 +346,34 @@ static int sceMotionDevSamplingStop_patched(void) {
 
 static int sceMotionDevRead_patched(SceMotionDevResult * resultList, int maxResult, int * setFlag) {
     int result = TAI_CONTINUE(int, g_hookrefs[26], resultList, maxResult, setFlag);
-	if (g_profile.bt_motion) {
-		result = psvs_bt_motion_filter_read(resultList, maxResult, setFlag);
-	}
+
+    if (g_profile.bt_motion) {
+        if (g_is_motion_dev_dummy) {
+            // No motion device (PS TV): always feed SceMotion the latest captured sample
+            result = psvs_bt_motion_filter_read(resultList, maxResult, setFlag);
+        } else if (g_motion_calib_synthetic) {
+            // Real sensors exist but SceMotion holds the synthetic calibration: inject the gamepad
+            // samples while they are fresh, otherwise report no samples rather than the real ones
+            result = psvs_bt_motion_available() ? psvs_bt_motion_filter_read(resultList, maxResult, setFlag) : 0;
+        }
+        // else: SceMotion holds the real calibration, let the real sensors through
+    } else if (g_motion_calib_synthetic && !g_is_motion_dev_dummy) {
+        // Motion emulation was switched off after SceMotion took the synthetic calibration
+        result = 0;
+    }
+
     return result;
 }
 
 static int sceMotionDevGetDeviceInfo_patched(uint32_t * deviceInfo) {
     int result = TAI_CONTINUE(int, g_hookrefs[27], deviceInfo);
 
-	uint32_t buffer;
-	if (g_is_motion_dev_dummy) {
-		result = psvs_bt_motion_reset_device_info(&buffer);
-		ksceKernelMemcpyKernelToUser(deviceInfo, &buffer, sizeof(buffer));
-	} else if (result >= 0) {
-		ksceKernelMemcpyUserToKernel(&buffer, deviceInfo, sizeof(buffer));
-		psvs_bt_motion_set_device_info(&buffer);
-	}
+    uint32_t buffer = 0;
+    g_motion_calib_synthetic = g_is_motion_dev_dummy || g_profile.bt_motion;
+    if (g_motion_calib_synthetic) {
+        result = psvs_bt_motion_reset_device_info(&buffer);
+        ksceKernelMemcpyKernelToUser(deviceInfo, &buffer, sizeof(buffer));
+    }
 
     return result;
 }
@@ -352,14 +381,12 @@ static int sceMotionDevGetDeviceInfo_patched(uint32_t * deviceInfo) {
 static int sceMotionDevGetGyroBias_patched(SceMotionDevGyroBias * bias) {
     int result = TAI_CONTINUE(int, g_hookrefs[28], bias);
 
-	SceMotionDevGyroBias buffer;
-	if (g_is_motion_dev_dummy) {
-		result = psvs_bt_motion_reset_gyro_bias(&buffer);
-		ksceKernelMemcpyKernelToUser(bias, &buffer, sizeof(buffer));
-	} else if (result >= 0) {
-		ksceKernelMemcpyUserToKernel(&buffer, bias, sizeof(buffer));
-		psvs_bt_motion_set_gyro_bias(&buffer);
-	}
+    SceMotionDevGyroBias buffer;
+    g_motion_calib_synthetic = g_is_motion_dev_dummy || g_profile.bt_motion;
+    if (g_motion_calib_synthetic) {
+        result = psvs_bt_motion_reset_gyro_bias(&buffer);
+        ksceKernelMemcpyKernelToUser(bias, &buffer, sizeof(buffer));
+    }
 
     return result;
 }
@@ -367,14 +394,12 @@ static int sceMotionDevGetGyroBias_patched(SceMotionDevGyroBias * bias) {
 static int sceMotionDevGetGyroCalibData_patched(SceMotionDevGyroCalibData * data) {
     int result = TAI_CONTINUE(int, g_hookrefs[29], data);
 
-	SceMotionDevGyroCalibData buffer;
-	if (g_is_motion_dev_dummy) {
-		result = psvs_bt_motion_reset_gyro_calib_data(&buffer);
-		ksceKernelMemcpyKernelToUser(data, &buffer, sizeof(buffer));
-	} else if (result >= 0) {
-		ksceKernelMemcpyUserToKernel(&buffer, data, sizeof(buffer));
-		psvs_bt_motion_set_gyro_calib_data(&buffer);
-	}
+    SceMotionDevGyroCalibData buffer;
+    g_motion_calib_synthetic = g_is_motion_dev_dummy || g_profile.bt_motion;
+    if (g_motion_calib_synthetic) {
+        result = psvs_bt_motion_reset_gyro_calib_data(&buffer);
+        ksceKernelMemcpyKernelToUser(data, &buffer, sizeof(buffer));
+    }
 
     return result;
 }
@@ -382,14 +407,12 @@ static int sceMotionDevGetGyroCalibData_patched(SceMotionDevGyroCalibData * data
 static int sceMotionDevGetAccCalibData_patched(SceMotionDevAccCalibData * data) {
     int result = TAI_CONTINUE(int, g_hookrefs[30], data);
 
-	SceMotionDevAccCalibData buffer;
-	if (g_is_motion_dev_dummy) {
-		result = psvs_bt_motion_reset_accel_calib_data(&buffer);
-		ksceKernelMemcpyKernelToUser(data, &buffer, sizeof(buffer));
-	} else if (result >= 0) {
-		ksceKernelMemcpyUserToKernel(&buffer, data, sizeof(buffer));
-		psvs_bt_motion_set_accel_calib_data(&buffer);
-	}
+    SceMotionDevAccCalibData buffer;
+    g_motion_calib_synthetic = g_is_motion_dev_dummy || g_profile.bt_motion;
+    if (g_motion_calib_synthetic) {
+        result = psvs_bt_motion_reset_accel_calib_data(&buffer);
+        ksceKernelMemcpyKernelToUser(data, &buffer, sizeof(buffer));
+    }
 
     return result;
 }
@@ -483,7 +506,7 @@ int module_start(SceSize argc, const void *args) {
     g_mutex_framebuf_uid = ksceKernelCreateMutex("psvs_mutex_framebuf", 0, 0, NULL);
 
     psvs_oc_init(); // reset profile options to default
-    psvs_bt_init(); // create mutexes for bt module
+    psvs_bt_init(); // create mutex for bt module
 
     // Initialize all hooks to -1
     for (int i = 0; i < PSVS_MAX_HOOKS; i++)
@@ -510,6 +533,14 @@ int module_start(SceSize argc, const void *args) {
             "SceCtrl", 0xD197E3C7, 0x67E7AB83, sceCtrlReadBufferPositive_patched);
     g_hooks[8] = taiHookFunctionExportForKernel(KERNEL_PID, &g_hookrefs[8],
             "SceCtrl", 0xD197E3C7, 0xC4226A3E, sceCtrlReadBufferPositive2_patched);
+    g_hooks[32] = taiHookFunctionExportForKernel(KERNEL_PID, &g_hookrefs[32],
+            "SceCtrl", 0xD197E3C7, 0xA59454D3, sceCtrlPeekBufferPositiveExt_patched);
+    g_hooks[33] = taiHookFunctionExportForKernel(KERNEL_PID, &g_hookrefs[33],
+            "SceCtrl", 0xD197E3C7, 0x860BF292, sceCtrlPeekBufferPositiveExt2_patched);
+    g_hooks[34] = taiHookFunctionExportForKernel(KERNEL_PID, &g_hookrefs[34],
+            "SceCtrl", 0xD197E3C7, 0xE2D99296, sceCtrlReadBufferPositiveExt_patched);
+    g_hooks[35] = taiHookFunctionExportForKernel(KERNEL_PID, &g_hookrefs[35],
+            "SceCtrl", 0xD197E3C7, 0xA7178860, sceCtrlReadBufferPositiveExt2_patched);
 
     // Hook power
     g_hooks[9] = taiHookFunctionExportForKernel(KERNEL_PID, &g_hookrefs[9],
@@ -536,6 +567,8 @@ int module_start(SceSize argc, const void *args) {
     // Hook bluetooth
     g_hooks[18] = taiHookFunctionExportForKernel(KERNEL_PID, &g_hookrefs[18],
             "SceBt", TAI_ANY_LIBRARY, 0xF9DCEC77, ksceBtHidTransfer_patched);
+    g_hooks[31] = taiHookFunctionExportForKernel(KERNEL_PID, &g_hookrefs[31],
+            "SceBt", TAI_ANY_LIBRARY, 0x5ABB9A9D, ksceBtReadEvent_patched);
 
     // Detect "SceTouch"/"SceTouchDummy" library
     g_is_touch_dummy = (taiGetModuleInfoForKernel(KERNEL_PID, "SceTouch", &tai_info) < 0);

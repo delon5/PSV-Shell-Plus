@@ -5,15 +5,26 @@ This is a fork of PSVshell, called PSVShell+. It adds a number of extra features
 
 ## Extra features
 
-- Swap the cross and cirle buttons for playing japanese games
+- Swap the cross and circle buttons for playing japanese games. The swap covers everything the game reads,
+  including the system dialogs it opens (save data, message and selection dialogs); the icons those dialogs show
+  still follow the system's enter-button setting
 - Disable **L3** and **R3** (the stick buttons) to prevent you from accidentally pressing them
 - DS4 touchpad emulation. This has three modes:
-  - **front:** Use the thouchpad to emulate the front touchscreen
-  - **F/B:** Emulated both the front and the back thouchpad, usign the touchpad button to toggle between them
+  - **front:** Use the touchpad to emulate the front touchscreen
+  - **F/B:** Emulates both the front and the back touchpad, using the touchpad button to toggle between them
   - **F/B/X:** Same as "F/B", but it toggles between front, back and off, not just front and back
-- DS4 motion emulation. This has two modes:
-  - **normal:** The DS4 controller has the same orientation as the Vita
-  - **vertical:** The DS4 held horizontally has the orientation of the Vita held vertically
+- DS3/DS4 motion emulation. This has two modes:
+  - **normal:** The controller has the same orientation as the Vita
+  - **vertical:** The controller held horizontally has the orientation of the Vita held vertically
+
+  The Bluetooth capture follows the [ds34motion](https://github.com/MERLev/ds34motion) design: the controller is
+  bound when it connects (or on its first report, if it was already connected when the plugin started), reports
+  are read when the transfer completes and the binding is dropped on disconnect. The DualShock 3 only has an
+  accelerometer and a yaw gyro, so the other two rotation axes stay still; the DS3 mapping is ported from
+  ds34motion and has not been tested on hardware in this port. On a real PS Vita the controller replaces the
+  internal sensors while motion emulation is enabled in the profile. Enable it before starting the game: the
+  synthetic sensor calibration is handed to SceMotion when it initialises, so toggling the setting mid-game
+  leaves motion disabled until the game is restarted (untested on a real PS Vita).
 - Reboot or shutdown the Vita. This just seemed nice to have on hand.
 
 In the "FULL" mode, there are now two pages, that you can switch between using **L** and **R**. The main page is the
@@ -21,11 +32,28 @@ same as it was in PSVshell. All the extra features added by PSVShell+ are on the
 
 Saving the profile on the main page (below the clock speeds) also save the extra features in the same manner.
 
+## Installation
+
+1. Copy `PSVshellPlus.skprx` to `ur0:tai/`.
+2. Add it to `ur0:tai/config.txt` under the `*KERNEL` section (and remove any older `psvshell+.skprx` line):
+
+   ```
+   *KERNEL
+   ur0:tai/PSVshellPlus.skprx
+   ```
+
+3. Reboot. Press **SELECT + UP** to open the menu; the extra features are on the second page (**L**/**R**).
+
+If you used DSMotion, ds34motion or ds4Touch for your DualShock, remove them: PSVShell+ replaces both once the
+"Bt Touch" and "Bt Motion" options are enabled in the profile. On a real PS Vita you still need ds34vita (or
+ds4vita) to connect the controller in the first place.
+
 ## Acknowledgments
 
 - To [Electry](https://github.com/Electry) for the original [PSVshell](https://github.com/Electry/PSVshell)
 - To [MERLev](https://github.com/MERLev) for [ds4Touch](https://github.com/MERLev/ds4Touch)
 - To [OperationNT414C](https://github.com/OperationNT414C) for [DSMotion](https://github.com/OperationNT414C/DSMotion)
+- To [MERLev](https://github.com/MERLev) for [ds34motion](https://github.com/MERLev/ds34motion), the successor of DSMotion
 - And a big thank you to [VitaSDK](https://github.com/vitasdk) for making this all possible.
 
 # Original readme
