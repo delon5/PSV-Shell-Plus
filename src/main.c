@@ -7,7 +7,7 @@ bool ksceAppMgrIsExclusiveProcessRunning();
 //bool ksceSblACMgrIsPspEmu(SceUID pid);
 //bool ksceSblACMgrIsSceShell(SceUID pid);
 
-#define PSVS_MAX_HOOKS 40 // highest index in use: 35
+#define PSVS_MAX_HOOKS 40 // highest index in use: 36
 static tai_hook_ref_t g_hookrefs[PSVS_MAX_HOOKS];
 static SceUID         g_hooks[PSVS_MAX_HOOKS];
 static SceUID         g_injects[1];
@@ -190,6 +190,38 @@ int kscePowerSetGpuEs4ClockFrequency_patched(int a1, int a2) {
 
 int kscePowerSetGpuXbarClockFrequency_patched(int freq) {
     return TAI_CONTINUE(int, g_hookrefs[12], psvs_oc_get_target_freq(PSVS_OC_DEVICE_GPU_XBAR, freq));
+}
+
+// Adrenaline (the PSP emulator) is left out of profiles and the menu, but a plugin running in it
+// (psp_bridge) may ask for more than 444 MHz, which ScePower refuses to applications: it gets
+// 444 MHz through ScePower first, then 500 MHz the way the menu sets it. Every other caller
+// gets ScePower's answer as before.
+static int scePowerSetArmClockFrequency_patched(int freq) {
+    uint32_t state;
+
+    if (freq <= 444 || freq > 500)
+        return TAI_CONTINUE(int, g_hookrefs[36], freq);
+
+    ENTER_SYSCALL(state);
+    bool pspemu = ksceSblACMgrIsPspEmu(ksceKernelGetProcessId());
+    EXIT_SYSCALL(state);
+    if (!pspemu)
+        return TAI_CONTINUE(int, g_hookrefs[36], freq);
+
+    int ret = TAI_CONTINUE(int, g_hookrefs[36], 444);
+    if (ret < 0)
+        return ret;
+
+    ENTER_SYSCALL(state);
+    if (ksceKernelLockMutex(g_mutex_cpufreq_uid, 1, NULL) >= 0) {
+        // Only when ScePower's stored clock reads the 444 just set (the layout
+        // psvs_oc_holy_shit() writes to); otherwise the CPU stays at 444
+        if (ScePower_41C8 && ScePower_41CC && *ScePower_41C8 == 444)
+            psvs_oc_holy_shit();
+        ksceKernelUnlockMutex(g_mutex_cpufreq_uid, 1);
+    }
+    EXIT_SYSCALL(state);
+    return ret;
 }
 
 DECL_FUNC_HOOK_PATCH_FREQ_GETTER(14, scePowerGetArmClockFrequency,     PSVS_OC_DEVICE_CPU)
@@ -563,6 +595,8 @@ int module_start(SceSize argc, const void *args) {
             "ScePower", 0x1082DA7F, 0x1B04A1D6, scePowerGetGpuClockFrequency_patched);
     g_hooks[17] = taiHookFunctionExportForKernel(KERNEL_PID, &g_hookrefs[17],
             "ScePower", 0x1082DA7F, 0x0A750DEE, scePowerGetGpuXbarClockFrequency_patched);
+    g_hooks[36] = taiHookFunctionExportForKernel(KERNEL_PID, &g_hookrefs[36],
+            "ScePower", 0x1082DA7F, 0x74DB5AE5, scePowerSetArmClockFrequency_patched);
 
     // Hook bluetooth
     g_hooks[18] = taiHookFunctionExportForKernel(KERNEL_PID, &g_hookrefs[18],

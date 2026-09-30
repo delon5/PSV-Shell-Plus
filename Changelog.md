@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to "Ad Hoc" versioning (meaning, I assign versions based on how I like it).
 
+## [1.4] - 2026-09-30
+### Added
+- Adrenaline may ask for a 500 MHz CPU clock. A plugin running inside the PSP emulator (psp_bridge) can request
+  more than 444 MHz through scePowerSetArmClockFrequency; the request is honoured the way the menu sets 500 MHz
+  (444 MHz through ScePower, then the 500 MHz clock select), provided ScePower's stored clock reads back as 444.
+  Requests from every other application are passed to ScePower unchanged, and Adrenaline stays out of the profiles
+  and the menu.
+
 ## [1.3] - 2026-09-26
 ### Fixed
 - The X/O swap and the L3/R3 disable now also apply to input read through the "Ext" controller functions
@@ -61,6 +69,7 @@ and this project adheres to "Ad Hoc" versioning (meaning, I assign versions base
 ### Changed
 - Updated the README.md with the additional features
 
+[1.4]: https://github.com/delon5/PSV-Shell-Plus/compare/1.3...1.4
 [1.3]: https://github.com/delon5/PSV-Shell-Plus/compare/1.2...1.3
 [1.2]: https://github.com/delon5/PSV-Shell-Plus/compare/1.1...1.2
 [1.1]: https://github.com/delon5/PSV-Shell-Plus/compare/1.0...1.1
