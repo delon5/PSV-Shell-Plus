@@ -42,9 +42,6 @@ uint32_t *ScePower_0    = NULL;
 // check inside it is disabled (see module_start); until then psvs_oc_holy_shit() does nothing
 bool g_oc_500_ready = false;
 
-// taiHEN's "a patch already exists at this address" (taiHEN error.h, not in the public header)
-#define PSVS_TAI_ERROR_PATCH_EXISTS ((int)0x90010005)
-
 int (*_kscePowerGetArmClockFrequency)();
 int (*_kscePowerGetBusClockFrequency)();
 int (*_kscePowerGetGpuEs4ClockFrequency)(int *a1, int *a2);
@@ -665,11 +662,12 @@ int module_start(SceSize argc, const void *args) {
     g_injects[0] = -1;
     if (ScePervasiveForDriver_0xE9D95643) {
         const uint8_t nop[] = {0x00, 0xBF};
-        g_injects[0] = taiInjectAbsForKernel(KERNEL_PID,
-                (void *)((uintptr_t)ScePervasiveForDriver_0xE9D95643 + 0x1D), &nop, 2);
-        // A patch another module already holds at that address is the same NOP (a second
-        // copy of this plugin), so the multiplier check is disabled either way
-        g_oc_500_ready = (g_injects[0] >= 0 || g_injects[0] == PSVS_TAI_ERROR_PATCH_EXISTS);
+        const volatile uint8_t *mul_check =
+                (const volatile uint8_t *)((uintptr_t)ScePervasiveForDriver_0xE9D95643 + 0x1D);
+        g_injects[0] = taiInjectAbsForKernel(KERNEL_PID, (void *)mul_check, &nop, 2);
+        // Ready only when the NOP really is in place, whether written here or already held by
+        // another module: taiHEN reports a patch at that address without saying what it holds
+        g_oc_500_ready = (mul_check[0] == nop[0] && mul_check[1] == nop[1]);
     }
 
     // Load main profile

@@ -12,10 +12,10 @@ and this project adheres to "Ad Hoc" versioning (meaning, I assign versions base
   Requests from every other application are passed to ScePower unchanged, and Adrenaline stays out of the profiles
   and the menu.
 ### Changed
-- The 500 MHz clock select is applied only when its low-level clock function was found at boot and the multiplier
-  check inside it was disabled (or another module had already disabled it). Otherwise a 500 MHz request, whether
-  from the menu, a profile or Adrenaline, stays at the 444 MHz ScePower sets and the clock getters keep reporting
-  444 MHz, instead of a call through a missing function or a reported 500 MHz the hardware never took.
+- The 500 MHz clock select is applied only when its low-level clock function was found at boot and the patch that
+  disables the multiplier check inside it reads back as in place. Otherwise a 500 MHz request, whether from the
+  menu, a profile or Adrenaline, stays at the 444 MHz ScePower sets and the clock getters keep reporting 444 MHz,
+  instead of a call through a missing function or a reported 500 MHz the hardware never took.
 
 ## [1.3] - 2026-09-26
 ### Fixed
