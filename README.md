@@ -26,6 +26,9 @@ This is a fork of PSVshell, called PSVShell+. It adds a number of extra features
   synthetic sensor calibration is handed to SceMotion when it initialises, so toggling the setting mid-game
   leaves motion disabled until the game is restarted (untested on a real PS Vita).
 - Reboot or shutdown the Vita. This just seemed nice to have on hand.
+- Adrenaline may ask for a 500 MHz CPU clock: a plugin running inside the PSP emulator (such as psp_bridge with
+  `clock_cpu=500` in `ge_patch.ini`) can request more than 444 MHz, and PSVShell+ applies 500 MHz the same way its
+  menu does. Other applications are limited to 444 MHz by the system as before.
 
 In the "FULL" mode, there are now two pages, that you can switch between using **L** and **R**. The main page is the
 same as it was in PSVshell. All the extra features added by PSVShell+ are on the second page.
