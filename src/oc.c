@@ -50,6 +50,12 @@ int psvs_oc_set_freq(psvs_oc_device_t device, int freq) {
 }
 
 void psvs_oc_holy_shit() {
+    // 500 MHz is unavailable when the ARM clock select was not found at boot or its multiplier
+    // check could not be disabled: the CPU stays at the 444 MHz ScePower has just set and the
+    // clock getters keep reporting 444
+    if (!g_oc_500_ready || !ScePower_41C8 || !ScePower_41CC)
+        return;
+
     // Apply mul:div (15:0)
     ScePervasiveForDriver_0xE9D95643(15, 16 - 0);
 

@@ -53,6 +53,7 @@ extern bool g_is_dolce;
 extern int (*SceSysmemForKernel_0x3650963F)(uint32_t a1, SceSysmemAddressSpaceInfo *a2);
 extern int (*SceThreadmgrForDriver_0x7E280B69)(SceKernelSystemInfo *pInfo);
 extern int (*ScePervasiveForDriver_0xE9D95643)(int mul, int ndiv);
+extern bool g_oc_500_ready;
 
 extern uint32_t *ScePower_41C8;
 extern uint32_t *ScePower_41CC;

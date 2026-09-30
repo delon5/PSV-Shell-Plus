@@ -38,6 +38,13 @@ uint32_t *ScePower_41C8 = NULL;
 uint32_t *ScePower_41CC = NULL;
 uint32_t *ScePower_0    = NULL;
 
+// 500 MHz is available only when the ARM clock select was found at boot and the multiplier
+// check inside it is disabled (see module_start); until then psvs_oc_holy_shit() does nothing
+bool g_oc_500_ready = false;
+
+// taiHEN's "a patch already exists at this address" (taiHEN error.h, not in the public header)
+#define PSVS_TAI_ERROR_PATCH_EXISTS ((int)0x90010005)
+
 int (*_kscePowerGetArmClockFrequency)();
 int (*_kscePowerGetBusClockFrequency)();
 int (*_kscePowerGetGpuEs4ClockFrequency)(int *a1, int *a2);
@@ -651,9 +658,19 @@ int module_start(SceSize argc, const void *args) {
     module_get_export_func(KERNEL_PID,
             "SceLowio", 0xE692C727, 0xE9D95643, (uintptr_t *)&ScePervasiveForDriver_0xE9D95643);
 
-    const uint8_t nop[] = {0x00, 0xBF};
-    g_injects[0] = taiInjectAbsForKernel(KERNEL_PID,
-            (void *)((uintptr_t)ScePervasiveForDriver_0xE9D95643 + 0x1D), &nop, 2);
+    // 500 MHz needs the ARM clock select and the check it makes on the multiplier disabled
+    // (a NOP at +0x1D). Without either, a 500 MHz request stays at the 444 MHz ScePower set
+    // and the clock getters keep reporting 444, rather than a call through a missing function
+    // or a reported 500 MHz the hardware never took.
+    g_injects[0] = -1;
+    if (ScePervasiveForDriver_0xE9D95643) {
+        const uint8_t nop[] = {0x00, 0xBF};
+        g_injects[0] = taiInjectAbsForKernel(KERNEL_PID,
+                (void *)((uintptr_t)ScePervasiveForDriver_0xE9D95643 + 0x1D), &nop, 2);
+        // A patch another module already holds at that address is the same NOP (a second
+        // copy of this plugin), so the multiplier check is disabled either way
+        g_oc_500_ready = (g_injects[0] >= 0 || g_injects[0] == PSVS_TAI_ERROR_PATCH_EXISTS);
+    }
 
     // Load main profile
     snprintf(g_titleid, sizeof(g_titleid), "main");
